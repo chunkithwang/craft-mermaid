@@ -1,0 +1,16 @@
+{
+  "name": "craft-dark",
+  "source": "Craft Agents default dark theme",
+  "rendererOptions": {
+    "bg": "#151618",
+    "fg": "#e3e4e8",
+    "accent": "#9770fc",
+    "line": "#4b4c4f",
+    "muted": "#737477",
+    "surface": "#1a1b1d",
+    "border": "#38393c",
+    "transparent": true,
+    "interactive": true
+  },
+  "previewBackground": "#151618"
+}

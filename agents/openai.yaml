@@ -1,0 +1,4 @@
+interface:
+  display_name: "Craft Mermaid"
+  short_description: "Generate and verify Craft-style Mermaid diagrams"
+  default_prompt: "Use $craft-mermaid to create and visually verify a Craft-style Mermaid diagram for this request."

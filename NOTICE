@@ -1,0 +1,12 @@
+Craft Mermaid
+Copyright 2026
+
+This project includes adapted workflow guidance, Mermaid syntax documentation,
+source normalization logic, renderer configuration, and default theme values
+from Craft Agents, Copyright 2026 Craft Docs Ltd., licensed under the Apache
+License, Version 2.0.
+
+Craft Agents: https://github.com/craft-ai-agents/craft-agents-oss
+
+The beautiful-mermaid and @resvg/resvg-js runtime dependencies are distributed
+under their respective licenses. See their package metadata for details.

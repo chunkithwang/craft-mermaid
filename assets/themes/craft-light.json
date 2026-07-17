@@ -1,0 +1,16 @@
+{
+  "name": "craft-light",
+  "source": "Craft Agents default light theme",
+  "rendererOptions": {
+    "bg": "#f7f8fa",
+    "fg": "#111317",
+    "accent": "#8453ed",
+    "line": "#aaabaf",
+    "muted": "#797b7f",
+    "surface": "#eff0f3",
+    "border": "#c3c4c7",
+    "transparent": true,
+    "interactive": true
+  },
+  "previewBackground": "#f7f8fa"
+}
