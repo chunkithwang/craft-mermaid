@@ -1,6 +1,6 @@
 ---
 name: craft-mermaid
-description: Create, render, and visually verify Craft-style Mermaid diagrams with the same beautiful-mermaid layout engine and matching light/dark palettes. Use for architecture, workflows, state transitions, API sequences, class models, entity relationships, XY charts, Mermaid code fences, .mmd files, or whenever a diagram would materially improve an explanation in Codex, Claude Code, or another shell-capable agent.
+description: Create, render, and visually verify Craft-style Mermaid diagrams with the same beautiful-mermaid layout engine and matching light/dark palettes. Use for architecture, workflows, state transitions, API sequences, class models, entity relationships, XY charts, Mermaid code fences, .mmd files, Craft Mermaid installation, updates, or runtime repair, or whenever a diagram would materially improve an explanation in Codex, Claude Code, or another shell-capable agent.
 ---
 
 # Craft Mermaid
@@ -27,6 +27,37 @@ diagram type. Read
 [references/visual-review.md](references/visual-review.md) before reviewing a
 rendered preview or repairing a diagram after review.
 
+## Complete Installation and Updates
+
+Do not treat a Craft Mermaid installation or update as complete when only the
+Skill files have been copied.
+
+After `skills add`, resolve the actual installed Skill directory from the
+installer's output. Obtain approval when required because dependency setup can
+use the network and modifies that directory, then run:
+
+```bash
+node <installed-skill-dir>/scripts/setup-runtime.mjs
+```
+
+When asked to update Craft Mermaid:
+
+1. Determine whether the installed copy is project-level or global. Run
+   `npx skills update craft-mermaid --project` or
+   `npx skills update craft-mermaid --global` with the matching explicit scope.
+2. Read the update result. If Craft Mermaid is already current, report that and
+   do not reinstall dependencies.
+3. If Craft Mermaid was updated, resolve the updated Skill directory. Skills CLI
+   replaces the directory and does not restore `scripts/runtime/node_modules`.
+4. Obtain dependency-installation approval when required, then run
+   `node <installed-skill-dir>/scripts/setup-runtime.mjs` before declaring the
+   update complete.
+
+The setup entry point checks Node.js compatibility, runs `npm ci` against the
+bundled lockfile, and runs the smoke test. Report the installed directory and
+test result. Treat a setup or test failure as an incomplete installation or
+update.
+
 ## Workflow
 
 1. Extract the entities, relationships, order, and labels from the request.
@@ -34,8 +65,9 @@ rendered preview or repairing a diagram after review.
 3. Write the source to a `.mmd` file in the user's requested output directory.
 4. Resolve this skill's directory and check for
    `scripts/runtime/node_modules`. If dependencies are absent, ask before
-   running `npm ci` in `scripts/runtime`; dependency installation can require
-   network access and modifies the skill directory.
+   running `node <skill-dir>/scripts/setup-runtime.mjs`; dependency installation
+   can require network access and modifies the skill directory. Do not continue
+   to rendering unless its smoke test succeeds.
 5. Render and validate with:
 
    ```bash

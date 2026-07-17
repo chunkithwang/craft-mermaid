@@ -20,17 +20,18 @@
 npx skills add https://github.com/chunkithwang/craft-mermaid --skill craft-mermaid
 ```
 
-安装 Skill 后，还需要在它的实际安装目录初始化一次渲染运行时：
+安装 Skill 后，让同一个安装 Agent 继续在实际安装目录初始化并验证渲染运行时：
 
 ```bash
 CRAFT_MERMAID_DIR="/absolute/path/to/craft-mermaid"
-npm ci --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
-npm test --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
+node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 ```
 
 常见安装位置包括项目内的 `.agents/skills/craft-mermaid`、用户级的
 `~/.agents/skills/craft-mermaid`、`~/.codex/skills/craft-mermaid` 或
 `~/.claude/skills/craft-mermaid`。以安装器实际返回的路径为准。
+初始化脚本会执行锁定版本的 `npm ci` 和 `npm test`；因为这一步可能访问网络
+并修改 Skill 目录，安装 Agent 应先请求授权，但不应把它拆成另一项安装任务。
 
 安装后直接对 Agent 说：
 
@@ -54,16 +55,17 @@ npm test --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
 npx skills add https://github.com/chunkithwang/craft-mermaid --skill craft-mermaid
 ```
 
-安装器完成后，进入它报告的 Skill 目录安装固定版本的运行时依赖：
+安装器完成后，让安装 Agent 使用它报告的 Skill 目录完成依赖安装与验证：
 
 ```bash
 CRAFT_MERMAID_DIR="/absolute/path/to/installed/craft-mermaid"
-npm ci --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
-npm test --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
+node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 ```
 
-`npm ci` 不应省略。Skill 的决策流程可以在没有依赖时被 Agent 读取，但
-SVG/PNG 渲染、确定性检查和视觉复检链路将无法完整执行。
+`setup-runtime.mjs` 不应省略。Skills CLI 只安装 Skill 文件，不会执行项目脚本；
+这个初始化入口会检查 Node.js 版本、执行 `npm ci`，再运行 smoke test。Skill
+的决策流程可以在没有依赖时被 Agent 读取，但 SVG/PNG 渲染、确定性检查和
+视觉复检链路将无法完整执行。
 
 ### 方式二：把下面这段话直接发给 AI
 
@@ -72,9 +74,11 @@ SVG/PNG 渲染、确定性检查和视觉复检链路将无法完整执行。
 > 1. 确认本机已安装 Node.js 20 或更高版本。
 > 2. 执行
 >    `npx skills add https://github.com/chunkithwang/craft-mermaid --skill craft-mermaid`。
-> 3. 找到安装后的 `craft-mermaid` 目录，在它的 `scripts/runtime` 目录运行
->    `npm ci`。
-> 4. 在同一目录运行 `npm test`。
+> 3. 不要在 `skills add` 完成后停止。找到安装器返回的实际 `craft-mermaid`
+>    目录；依赖安装可能访问网络并修改该目录，因此先向我请求授权。
+> 4. 获得授权后，运行
+>    `node <实际安装目录>/scripts/setup-runtime.mjs`。它会依次执行锁定依赖的
+>    `npm ci` 和 `npm test`，任一步失败都视为安装未完成。
 > 5. 检查 `SKILL.md`、`assets/`、`references/` 和 `scripts/runtime/` 是否存在，
 >    并告诉我实际安装路径和测试结果。
 
@@ -87,31 +91,61 @@ Codex：
 
 ```bash
 git clone https://github.com/chunkithwang/craft-mermaid.git ~/.codex/skills/craft-mermaid
-npm ci --prefix ~/.codex/skills/craft-mermaid/scripts/runtime
-npm test --prefix ~/.codex/skills/craft-mermaid/scripts/runtime
+node ~/.codex/skills/craft-mermaid/scripts/setup-runtime.mjs
 ```
 
 Claude Code：
 
 ```bash
 git clone https://github.com/chunkithwang/craft-mermaid.git ~/.claude/skills/craft-mermaid
-npm ci --prefix ~/.claude/skills/craft-mermaid/scripts/runtime
-npm test --prefix ~/.claude/skills/craft-mermaid/scripts/runtime
+node ~/.claude/skills/craft-mermaid/scripts/setup-runtime.mjs
 ```
 
 其他支持 Agent Skills 的工具，请把完整仓库克隆到该工具约定的 Skill
-目录，再对 `scripts/runtime` 执行同样的 `npm ci` 和 `npm test`。
+目录，再执行同一个 `scripts/setup-runtime.mjs` 初始化入口。
 
-### 更新
+### Skills CLI 更新
+
+明确指定要更新项目级还是全局 Skill：
+
+```bash
+# 项目级
+npx skills update craft-mermaid --project
+
+# 全局
+npx skills update craft-mermaid --global
+```
+
+如果 Skills CLI 报告 Craft Mermaid 已更新，它会替换 Skill 目录，原来的
+`scripts/runtime/node_modules` 不会被恢复。更新 Agent 必须继续定位实际安装
+目录，并在获得依赖安装授权后运行：
+
+```bash
+CRAFT_MERMAID_DIR="/absolute/path/to/installed/craft-mermaid"
+node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
+```
+
+如果 Skills CLI 报告已经是最新版，则不要重复安装依赖。
+
+也可以把下面这段话直接发给 AI：
+
+> 帮我更新 `craft-mermaid` Skill。请先确认它是项目级还是全局安装，再使用
+> 对应的 `npx skills update craft-mermaid --project` 或 `--global`。不要在文件
+> 更新后停止：如果 Skills CLI 确认 Craft Mermaid 已更新，找到更新后的实际
+> Skill 目录，先向我请求依赖安装授权，再运行
+> `node <实际安装目录>/scripts/setup-runtime.mjs`，并报告更新路径和测试结果。
+> 如果它已经是最新版，不要重复执行依赖安装。
+
+### 手动 Git 更新
 
 ```bash
 CRAFT_MERMAID_DIR="/absolute/path/to/installed/craft-mermaid"
 git -C "$CRAFT_MERMAID_DIR" pull
-npm ci --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
-npm test --prefix "$CRAFT_MERMAID_DIR/scripts/runtime"
+node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 ```
 
-重新执行 `npm ci` 可以让本地运行时与仓库中的 `package-lock.json` 保持一致。
+在 Git 实际拉取到新提交后重新执行初始化入口，使本地运行时与仓库中的
+`package-lock.json` 保持一致，并立即验证渲染链路。
 
 ## 为什么不只输出 Mermaid 代码块
 
@@ -231,6 +265,7 @@ craft-mermaid/
 │   ├── syntax.md
 │   └── visual-review.md
 └── scripts/
+    ├── setup-runtime.mjs
     └── runtime/
         ├── render.mjs
         ├── inspect-svg.mjs
