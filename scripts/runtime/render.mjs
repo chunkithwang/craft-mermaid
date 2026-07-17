@@ -207,6 +207,40 @@ export function flattenSvgColors(svg, rendererOptions) {
   return flattened
 }
 
+const PORTABLE_ARROW_WIDTH = 12
+const PORTABLE_ARROW_HEIGHT = 8
+
+/**
+ * Keep directed edges visible in SVG consumers that size markers differently.
+ * The renderer's default 8x5 marker is easy to lose at preview scale, while
+ * userSpaceOnUse keeps the arrowhead independent from the connector width.
+ */
+export function normalizeArrowMarkers(svg) {
+  return svg.replace(
+    /<marker\b([^>]*\bid=["'](?:arrowhead(?:-start)?(?:-[^"']+)?|seq-arrow(?:-open)?)["'][^>]*)>([\s\S]*?)<\/marker>/gi,
+    (marker, attributes, content) => {
+      const id = attributes.match(/\bid=["']([^"']+)["']/i)?.[1] ?? ''
+      const isStart = id === 'arrowhead-start' || id.startsWith('arrowhead-start-')
+      const isSequence = id === 'seq-arrow' || id === 'seq-arrow-open'
+      const normalizedAttributes = attributes
+        .replace(/\smarkerWidth=["'][^"']*["']/i, '')
+        .replace(/\smarkerHeight=["'][^"']*["']/i, '')
+        .replace(/\srefX=["'][^"']*["']/i, '')
+        .replace(/\srefY=["'][^"']*["']/i, '')
+        .replace(/\smarkerUnits=["'][^"']*["']/i, '')
+        .replace(/\sviewBox=["'][^"']*["']/i, '')
+        .replace(/\soverflow=["'][^"']*["']/i, '')
+      const points = isStart
+        ? `${PORTABLE_ARROW_WIDTH} 0, 0 ${PORTABLE_ARROW_HEIGHT / 2}, ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT}`
+        : `0 0, ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT / 2}, 0 ${PORTABLE_ARROW_HEIGHT}`
+      const normalizedContent = content.replace(/(<(?:polygon|polyline)\b[^>]*\bpoints=)["'][^"']*["']/i, `$1"${points}"`)
+
+      const refX = isStart ? 1.5 : isSequence ? PORTABLE_ARROW_WIDTH : PORTABLE_ARROW_WIDTH - 1.5
+      return `<marker${normalizedAttributes} markerWidth="${PORTABLE_ARROW_WIDTH}" markerHeight="${PORTABLE_ARROW_HEIGHT}" refX="${refX}" refY="${PORTABLE_ARROW_HEIGHT / 2}" markerUnits="userSpaceOnUse" viewBox="0 0 ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT}" overflow="visible">${normalizedContent}</marker>`
+    },
+  )
+}
+
 function countPixelsNear(pixels, color, tolerance = 3) {
   const expected = hexToRgb(color)
   let count = 0
@@ -290,8 +324,9 @@ export async function renderDiagram(options) {
 
     const theme = await loadTheme(options.theme)
     const rawSvg = renderMermaidSVG(normalized, theme.rendererOptions)
-    const svg = sanitizeGeneratedSvg(rawSvg)
-    if (svg !== rawSvg) report.warnings.push('Potentially unsafe SVG content was removed from the rendered output.')
+    const sanitizedSvg = sanitizeGeneratedSvg(rawSvg)
+    if (sanitizedSvg !== rawSvg) report.warnings.push('Potentially unsafe SVG content was removed from the rendered output.')
+    const svg = flattenSvgColors(normalizeArrowMarkers(sanitizedSvg), theme.rendererOptions)
     const inspection = inspectSvg(svg)
     report.errors.push(...inspection.errors)
     report.warnings.push(...inspection.warnings)

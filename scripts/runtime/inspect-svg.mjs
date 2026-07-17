@@ -56,10 +56,30 @@ export function inspectSvg(svg) {
   if (/<script\b/i.test(svg)) errors.push('SVG contains a script element.')
   if (EVENT_HANDLER_RE.test(svg)) errors.push('SVG contains an inline event handler.')
   EVENT_HANDLER_RE.lastIndex = 0
+  if (/var\(|color-mix\(/i.test(svg)) errors.push('SVG contains unresolved CSS colors; portable output must use concrete color values.')
   if (EXTERNAL_URL_RE.test(svg)) warnings.push('SVG contains an external URL reference.')
   EXTERNAL_URL_RE.lastIndex = 0
   if (/@import\s+url\(\s*["']?https?:\/\//i.test(svg)) warnings.push('SVG imports a remote font; offline viewers will use a system-font fallback.')
   if (/<foreignObject\b/i.test(svg)) warnings.push('SVG contains foreignObject content; verify host compatibility.')
+
+  const markerIds = new Set(
+    [...svg.matchAll(/<marker\b[^>]*\bid=["']([^"']+)["']/gi)].map(match => match[1]),
+  )
+  const edgeTags = [...svg.matchAll(/<(?:path|polyline|line)\b[^>]*>/gi)].map(match => match[0])
+  const semanticDirectedEdgeTags = edgeTags.filter(tag => /\bdata-arrow-(?:start|end)=["']true["']/i.test(tag))
+  const markerEdgeTags = edgeTags.filter(tag => /\bmarker-(?:start|end)=["']url\(#/i.test(tag))
+  const directedEdgeTags = [...new Set([...semanticDirectedEdgeTags, ...markerEdgeTags])]
+  const arrowMarkerReferences = markerEdgeTags.flatMap(tag =>
+    [...tag.matchAll(/\bmarker-(?:start|end)=["']url\(#([^)'"\s]+)\)["']/gi)].map(reference => reference[1]),
+  )
+  const unresolvedArrowMarkers = [...new Set(arrowMarkerReferences.filter(id => !markerIds.has(id)))]
+
+  if (semanticDirectedEdgeTags.some(tag => !/\bmarker-(?:start|end)=["']url\(#/i.test(tag))) {
+    errors.push('One or more directed edges do not reference an SVG arrow marker.')
+  }
+  if (unresolvedArrowMarkers.length > 0) {
+    errors.push(`Directed edges reference missing SVG markers: ${unresolvedArrowMarkers.join(', ')}.`)
+  }
 
   if (dimensions?.aspectRatio > 3) {
     warnings.push(`Diagram is very wide (${dimensions.aspectRatio.toFixed(2)}:1); review text size and horizontal flow.`)
@@ -75,6 +95,9 @@ export function inspectSvg(svg) {
     edgeElements: (svg.match(/<(?:path|polyline|line)\b/gi) ?? []).length,
     rectElements: (svg.match(/<rect\b/gi) ?? []).length,
     groupElements: (svg.match(/<g\b/gi) ?? []).length,
+    directedEdges: directedEdgeTags.length,
+    arrowMarkerDefinitions: markerIds.size,
+    arrowMarkerReferences: arrowMarkerReferences.length,
   }
 
   if (metrics.textElements > 60) warnings.push('Diagram contains more than 60 text elements; visual density may be excessive.')

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renderDiagram } from './render.mjs'
+import { flattenSvgColors, normalizeArrowMarkers, renderDiagram } from './render.mjs'
+import { inspectSvg } from './inspect-svg.mjs'
 import { recordReview } from './record-review.mjs'
 
 const fixtures = {
@@ -34,12 +35,55 @@ for (const [name, source] of Object.entries(fixtures)) {
   assert.ok(report.artifacts.svg)
   assert.ok(report.artifacts.png)
   assert.ok(report.raster.readablePixels > 20, `${name}: preview has no readable palette content`)
+  const svg = await readFile(report.artifacts.svg, 'utf8')
+  assert.doesNotMatch(svg, /var\(|color-mix\(/i, `${name}: portable SVG contains unresolved colors`)
+  if (['flowchart', 'state', 'sequence'].includes(name)) {
+    assert.ok(report.metrics.directedEdges > 0, `${name}: fixture should contain directed edges`)
+    assert.ok(report.metrics.arrowMarkerReferences > 0, `${name}: fixture should reference arrow markers`)
+    assert.match(svg, /markerWidth="12" markerHeight="8"[^>]*markerUnits="userSpaceOnUse"/)
+  }
   if (report.raster.accentPixels > 3) diagramsWithAccent += 1
   const png = await readFile(report.artifacts.png)
   assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG')
 }
 
 assert.ok(diagramsWithAccent >= 3, 'Rendered fixture set does not exercise enough accent-colored content')
+
+const missingMarkerInspection = inspectSvg(`
+  <svg width="100" height="100">
+    <polyline data-arrow-end="true" marker-end="url(#missing)" points="0,0 10,10" />
+  </svg>
+`)
+assert.equal(missingMarkerInspection.valid, false)
+assert.match(missingMarkerInspection.errors.join(' '), /missing SVG markers: missing/)
+
+const missingReferenceInspection = inspectSvg(`
+  <svg width="100" height="100">
+    <polyline data-arrow-end="true" points="0,0 10,10" />
+  </svg>
+`)
+assert.equal(missingReferenceInspection.valid, false)
+assert.match(missingReferenceInspection.errors.join(' '), /do not reference an SVG arrow marker/)
+
+const normalizedMarker = normalizeArrowMarkers(`
+  <svg><defs><marker id="arrowhead" markerWidth="8" markerHeight="5" refX="7" refY="2.5">
+    <polygon points="0 0, 8 2.5, 0 5" />
+  </marker></defs></svg>
+`)
+assert.match(normalizedMarker, /markerWidth="12" markerHeight="8"[^>]*markerUnits="userSpaceOnUse"/)
+assert.match(normalizedMarker, /points="0 0, 12 4, 0 8"/)
+assert.equal(
+  flattenSvgColors('<svg style="--accent: #8453ed"><polygon fill="var(--_arrow)" /></svg>', {
+    bg: '#f7f8fa',
+    fg: '#111317',
+    accent: '#8453ed',
+    line: '#aaabaf',
+    muted: '#797b7f',
+    surface: '#eff0f3',
+    border: '#c3c4c7',
+  }).includes('var('),
+  false,
+)
 
 const invalidInput = join(root, 'invalid.mmd')
 await writeFile(invalidInput, 'pie\n    "A" : 1\n', 'utf8')
