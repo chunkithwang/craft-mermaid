@@ -8,6 +8,9 @@ import { Resvg } from '@resvg/resvg-js'
 import { inspectSvg, parseSvgDimensions, sanitizeGeneratedSvg } from './inspect-svg.mjs'
 
 const RENDERER_VERSION = '1.1.3'
+const DEFAULT_SCALE = 3
+const DEFAULT_MAX_WIDTH = 4096
+const DEFAULT_MAX_HEIGHT = 3072
 const SUPPORTED_PREFIXES = [
   'graph',
   'flowchart',
@@ -50,9 +53,9 @@ export function detectDiagramType(code) {
 function parseArgs(argv) {
   const result = {
     theme: 'craft-light',
-    format: 'all',
-    maxWidth: 1600,
-    maxHeight: 1200,
+    scale: DEFAULT_SCALE,
+    maxWidth: DEFAULT_MAX_WIDTH,
+    maxHeight: DEFAULT_MAX_HEIGHT,
     json: false,
     help: false,
   }
@@ -72,7 +75,7 @@ function parseArgs(argv) {
     if (arg === '--input') result.input = value
     else if (arg === '--out-dir') result.outDir = value
     else if (arg === '--theme') result.theme = value
-    else if (arg === '--format') result.format = value
+    else if (arg === '--scale') result.scale = Number(value)
     else if (arg === '--max-width') result.maxWidth = Number(value)
     else if (arg === '--max-height') result.maxHeight = Number(value)
     else throw new Error(`Unknown option: ${arg}`)
@@ -82,7 +85,7 @@ function parseArgs(argv) {
   if (!result.help && !result.input) throw new Error('--input is required')
   if (!result.help && !result.outDir) throw new Error('--out-dir is required')
   if (!['craft-light', 'craft-dark'].includes(result.theme)) throw new Error(`Unknown theme: ${result.theme}`)
-  if (!['svg', 'png', 'all'].includes(result.format)) throw new Error(`Unknown format: ${result.format}`)
+  if (!Number.isFinite(result.scale) || result.scale <= 0) throw new Error('--scale must be positive')
   if (!Number.isFinite(result.maxWidth) || result.maxWidth <= 0) throw new Error('--max-width must be positive')
   if (!Number.isFinite(result.maxHeight) || result.maxHeight <= 0) throw new Error('--max-height must be positive')
   return result
@@ -207,8 +210,39 @@ export function flattenSvgColors(svg, rendererOptions) {
   return flattened
 }
 
-const PORTABLE_ARROW_WIDTH = 12
-const PORTABLE_ARROW_HEIGHT = 8
+const FLOW_ARROW_WIDTH = 9
+const FLOW_ARROW_HEIGHT = 6
+const SEQUENCE_ARROW_WIDTH = 12
+const SEQUENCE_ARROW_HEIGHT = 8
+const MARKER_SEGMENT_EPSILON = 0.01
+
+/**
+ * Remove imperceptible segments before SVG consumers infer marker direction.
+ * A sub-pixel final segment can make an otherwise vertical edge point sideways.
+ */
+export function normalizeMarkerPolylinePoints(svg) {
+  return svg.replace(
+    /<polyline\b[^>]*\bmarker-(?:start|end)=["'][^"']+["'][^>]*>/gi,
+    tag => tag.replace(/\bpoints=(["'])([^"']*)\1/i, (attribute, quote, value) => {
+      const coordinates = value.trim().split(/\s+/).map(pair => pair.split(',').map(Number))
+      if (
+        coordinates.length < 2
+        || coordinates.some(pair => pair.length !== 2 || pair.some(coordinate => !Number.isFinite(coordinate)))
+      ) return attribute
+
+      const normalized = [coordinates[0]]
+      for (const point of coordinates.slice(1)) {
+        const previous = normalized[normalized.length - 1]
+        if (Math.hypot(point[0] - previous[0], point[1] - previous[1]) > MARKER_SEGMENT_EPSILON) {
+          normalized.push(point)
+        }
+      }
+
+      if (normalized.length < 2 || normalized.length === coordinates.length) return attribute
+      return `points=${quote}${normalized.map(point => point.join(',')).join(' ')}${quote}`
+    }),
+  )
+}
 
 /**
  * Keep directed edges visible in SVG consumers that size markers differently.
@@ -222,6 +256,8 @@ export function normalizeArrowMarkers(svg) {
       const id = attributes.match(/\bid=["']([^"']+)["']/i)?.[1] ?? ''
       const isStart = id === 'arrowhead-start' || id.startsWith('arrowhead-start-')
       const isSequence = id === 'seq-arrow' || id === 'seq-arrow-open'
+      const width = isSequence ? SEQUENCE_ARROW_WIDTH : FLOW_ARROW_WIDTH
+      const height = isSequence ? SEQUENCE_ARROW_HEIGHT : FLOW_ARROW_HEIGHT
       const normalizedAttributes = attributes
         .replace(/\smarkerWidth=["'][^"']*["']/i, '')
         .replace(/\smarkerHeight=["'][^"']*["']/i, '')
@@ -231,12 +267,12 @@ export function normalizeArrowMarkers(svg) {
         .replace(/\sviewBox=["'][^"']*["']/i, '')
         .replace(/\soverflow=["'][^"']*["']/i, '')
       const points = isStart
-        ? `${PORTABLE_ARROW_WIDTH} 0, 0 ${PORTABLE_ARROW_HEIGHT / 2}, ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT}`
-        : `0 0, ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT / 2}, 0 ${PORTABLE_ARROW_HEIGHT}`
+        ? `${width} 0, 0 ${height / 2}, ${width} ${height}`
+        : `0 0, ${width} ${height / 2}, 0 ${height}`
       const normalizedContent = content.replace(/(<(?:polygon|polyline)\b[^>]*\bpoints=)["'][^"']*["']/i, `$1"${points}"`)
 
-      const refX = isStart ? 1.5 : isSequence ? PORTABLE_ARROW_WIDTH : PORTABLE_ARROW_WIDTH - 1.5
-      return `<marker${normalizedAttributes} markerWidth="${PORTABLE_ARROW_WIDTH}" markerHeight="${PORTABLE_ARROW_HEIGHT}" refX="${refX}" refY="${PORTABLE_ARROW_HEIGHT / 2}" markerUnits="userSpaceOnUse" viewBox="0 0 ${PORTABLE_ARROW_WIDTH} ${PORTABLE_ARROW_HEIGHT}" overflow="visible">${normalizedContent}</marker>`
+      const refX = isStart ? 1 : width
+      return `<marker${normalizedAttributes} markerWidth="${width}" markerHeight="${height}" refX="${refX}" refY="${height / 2}" markerUnits="userSpaceOnUse" viewBox="0 0 ${width} ${height}" overflow="visible">${normalizedContent}</marker>`
     },
   )
 }
@@ -255,10 +291,10 @@ function countPixelsNear(pixels, color, tolerance = 3) {
   return count
 }
 
-function rasterize(svg, theme, maxWidth, maxHeight) {
+function rasterize(svg, theme, requestedScale, maxWidth, maxHeight) {
   const dimensions = parseSvgDimensions(svg)
   if (!dimensions) throw new Error('Cannot rasterize SVG without valid dimensions.')
-  const scale = Math.min(maxWidth / dimensions.width, maxHeight / dimensions.height, 2)
+  const scale = Math.min(maxWidth / dimensions.width, maxHeight / dimensions.height, requestedScale)
   const rasterSvg = flattenSvgColors(svg, theme.rendererOptions)
   const resvg = new Resvg(rasterSvg, {
     background: theme.previewBackground,
@@ -279,6 +315,7 @@ function rasterize(svg, theme, maxWidth, maxHeight) {
     metrics: {
       width: rendered.width,
       height: rendered.height,
+      scale,
       foregroundPixels,
       mutedPixels,
       linePixels,
@@ -298,14 +335,12 @@ export async function renderDiagram(options) {
   const defaultSourcePath = join(outDir, `${base}.mmd`)
   const paths = {
     source: resolve(defaultSourcePath) === inputPath ? join(outDir, `${base}.normalized.mmd`) : defaultSourcePath,
-    svg: join(outDir, `${base}.svg`),
     png: join(outDir, `${base}.png`),
-    report: join(outDir, `${base}.report.json`),
   }
 
   await mkdir(outDir, { recursive: true })
 
-  const report = {
+  const result = {
     valid: false,
     renderer: 'beautiful-mermaid',
     rendererVersion: RENDERER_VERSION,
@@ -314,7 +349,6 @@ export async function renderDiagram(options) {
     artifacts: {},
     errors: [],
     warnings: [],
-    visualReview: { status: 'pending' },
   }
 
   try {
@@ -325,43 +359,43 @@ export async function renderDiagram(options) {
     const theme = await loadTheme(options.theme)
     const rawSvg = renderMermaidSVG(normalized, theme.rendererOptions)
     const sanitizedSvg = sanitizeGeneratedSvg(rawSvg)
-    if (sanitizedSvg !== rawSvg) report.warnings.push('Potentially unsafe SVG content was removed from the rendered output.')
-    const svg = flattenSvgColors(normalizeArrowMarkers(sanitizedSvg), theme.rendererOptions)
+    if (sanitizedSvg !== rawSvg) result.warnings.push('Potentially unsafe SVG content was removed from the rendered output.')
+    const svg = flattenSvgColors(
+      normalizeArrowMarkers(normalizeMarkerPolylinePoints(sanitizedSvg)),
+      theme.rendererOptions,
+    )
     const inspection = inspectSvg(svg)
-    report.errors.push(...inspection.errors)
-    report.warnings.push(...inspection.warnings)
-    report.metrics = inspection.metrics
+    result.errors.push(...inspection.errors)
+    result.warnings.push(...inspection.warnings)
+    result.metrics = inspection.metrics
     if (!inspection.valid) throw new Error(inspection.errors.join(' '))
 
     await writeFile(paths.source, normalized.endsWith('\n') ? normalized : `${normalized}\n`, 'utf8')
-    report.artifacts.source = paths.source
+    result.artifacts.source = paths.source
 
-    if (options.format === 'svg' || options.format === 'all') {
-      await writeFile(paths.svg, svg, 'utf8')
-      report.artifacts.svg = paths.svg
+    const raster = rasterize(
+      svg,
+      theme,
+      options.scale ?? DEFAULT_SCALE,
+      options.maxWidth ?? DEFAULT_MAX_WIDTH,
+      options.maxHeight ?? DEFAULT_MAX_HEIGHT,
+    )
+    await writeFile(paths.png, raster.png)
+    result.artifacts.png = paths.png
+    result.raster = raster.metrics
+    if (raster.metrics.readablePixels === 0) {
+      throw new Error('Rasterized preview contains no readable palette-colored pixels.')
+    }
+    if (raster.metrics.accentPixels === 0) {
+      result.warnings.push('Rasterized preview contains no accent-colored pixels; verify arrow visibility.')
     }
 
-    if (options.format === 'png' || options.format === 'all') {
-      const raster = rasterize(svg, theme, options.maxWidth, options.maxHeight)
-      await writeFile(paths.png, raster.png)
-      report.artifacts.png = paths.png
-      report.raster = raster.metrics
-      if (raster.metrics.readablePixels === 0) {
-        throw new Error('Rasterized preview contains no readable palette-colored pixels.')
-      }
-      if (raster.metrics.accentPixels === 0) {
-        report.warnings.push('Rasterized preview contains no accent-colored pixels; verify arrow visibility.')
-      }
-    }
-
-    report.valid = true
+    result.valid = true
   } catch (error) {
-    report.errors.push(error instanceof Error ? error.message : String(error))
+    result.errors.push(error instanceof Error ? error.message : String(error))
   }
 
-  report.artifacts.report = paths.report
-  await writeFile(paths.report, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
-  return report
+  return result
 }
 
 async function main() {
@@ -370,19 +404,19 @@ async function main() {
     options = parseArgs(process.argv.slice(2))
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
-    console.error('Usage: node render.mjs --input <file.mmd> --out-dir <dir> [--theme craft-light|craft-dark] [--format svg|png|all] [--max-width 1600] [--max-height 1200] [--json]')
+    console.error('Usage: node render.mjs --input <file.mmd> --out-dir <dir> [--theme craft-light|craft-dark] [--scale 3] [--max-width 4096] [--max-height 3072] [--json]')
     process.exitCode = 2
     return
   }
 
   if (options.help) {
-    console.log('Usage: node render.mjs --input <file.mmd> --out-dir <dir> [--theme craft-light|craft-dark] [--format svg|png|all] [--max-width 1600] [--max-height 1200] [--json]')
+    console.log('Usage: node render.mjs --input <file.mmd> --out-dir <dir> [--theme craft-light|craft-dark] [--scale 3] [--max-width 4096] [--max-height 3072] [--json]')
     return
   }
 
-  const report = await renderDiagram(options)
-  console.log(options.json ? JSON.stringify(report, null, 2) : report.valid ? `Rendered ${report.artifacts.svg ?? report.artifacts.png}` : report.errors.join('\n'))
-  if (!report.valid) process.exitCode = 1
+  const result = await renderDiagram(options)
+  console.log(options.json ? JSON.stringify(result, null, 2) : result.valid ? `Rendered ${result.artifacts.png}` : result.errors.join('\n'))
+  if (!result.valid) process.exitCode = 1
 }
 
 async function isMainModule() {

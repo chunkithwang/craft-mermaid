@@ -5,9 +5,9 @@ description: Create, render, and visually verify Craft-style Mermaid diagrams wi
 
 # Craft Mermaid
 
-Create focused Mermaid diagrams and deterministic SVG/PNG artifacts using the
-same renderer family as Craft Agents. Treat the rendered artifact, not the host
-client's Mermaid preview, as the portable visual result.
+Create focused Mermaid diagrams and deterministic high-resolution PNG artifacts
+using the same renderer family as Craft Agents. Treat the rendered PNG, not the
+host client's Mermaid preview, as the portable visual result.
 
 ## Preserve Craft Compatibility
 
@@ -75,28 +75,20 @@ update.
      --input <diagram.mmd> \
      --out-dir <output-directory> \
      --theme craft-light \
-     --format all \
      --json
    ```
 
-6. Read the generated report. Stop and repair syntax when `valid` is false.
+6. Read the JSON validation result from stdout. Stop and repair syntax when
+   `valid` is false. Do not save it as a report artifact.
 7. Inspect the generated PNG using the host's image-inspection capability when
    one exists. Judge it using `references/visual-review.md`; never infer visual
    quality from Mermaid source alone.
-8. Save the structured result as `<name>.visual-review.json`, then attach it to
-   the render report with:
-
-   ```bash
-   node <skill-dir>/scripts/runtime/record-review.mjs \
-     --report <name>.report.json \
-     --review <name>.visual-review.json \
-     --json
-   ```
-
+8. Keep the structured visual-review result in the current reasoning context;
+   do not write a separate review or render-report file.
 9. Repair and re-render at most twice. Preserve semantics while fixing layout.
-10. Deliver the `.mmd`, `.svg`, `.png`, and `.report.json` artifacts. Embed or
-   link the SVG/PNG when the host supports it. Include a Mermaid code fence only
-   as editable source; a host renderer may produce a different appearance.
+10. Deliver only the `.mmd` and `.png` artifacts. Embed or link the PNG when the
+    host supports it. Include a Mermaid code fence only as editable source; a
+    host renderer may produce a different appearance.
 
 ## Render Options
 
@@ -107,17 +99,18 @@ dark artifact. The runtime supports:
 --input <path>             Required Mermaid source
 --out-dir <path>           Required artifact directory
 --theme craft-light|craft-dark
---format svg|png|all       Default: all
---max-width <pixels>       Default: 1600
---max-height <pixels>      Default: 1200
---json                     Print the report as JSON
+--scale <factor>           Default: 3
+--max-width <pixels>       Default: 4096
+--max-height <pixels>      Default: 3072
+--json                     Print validation details to stdout
 ```
 
-The runtime writes normalized Mermaid source beside the rendered artifacts. It
-uses YAML frontmatter only as input metadata and removes it before rendering,
-matching the Craft renderer pipeline. When the output directory is also the
-input directory, it writes `<name>.normalized.mmd` instead of overwriting the
-original source.
+The runtime writes normalized Mermaid source beside the high-resolution PNG. It
+uses an in-memory SVG for deterministic validation and rasterization but does
+not save or deliver that intermediate representation. YAML frontmatter is used
+only as input metadata and removed before rendering, matching the Craft renderer
+pipeline. When the output directory is also the input directory, the runtime
+writes `<name>.normalized.mmd` instead of overwriting the original source.
 
 ## Visual Review
 
@@ -125,15 +118,10 @@ original source.
 - Check clipping, overlap, legibility, grouping, direction, whitespace, and
   semantic coverage.
 - Modify layout before shortening meaningful labels.
-- Mark visual review as `skipped` when the host cannot inspect images. Run
-  `inspect-svg.mjs` for deterministic checks, but do not claim visual approval.
+- Mark visual review as `skipped` when the host cannot inspect images. The
+  renderer still performs deterministic checks on its in-memory SVG, but those
+  checks do not constitute visual approval.
 - Report unresolved issues after two repair rounds instead of looping.
-
-Run deterministic SVG inspection independently when needed:
-
-```bash
-node <skill-dir>/scripts/runtime/inspect-svg.mjs <diagram.svg> --json
-```
 
 ## Failure Rules
 

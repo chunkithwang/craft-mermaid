@@ -11,8 +11,8 @@
 生成、渲染和视觉复检流程封装成可移植 Skill，并使用相同的
 `beautiful-mermaid` 渲染器系列与匹配的明暗主题。
 
-这个项目交付实际的 `.svg` 和 `.png` 文件，而不是依赖宿主对 Mermaid
-代码块的默认预览。这样在不同 Agent 中使用时，图表外观更稳定。
+这个项目交付规范化 `.mmd` 源码和高分辨率 `.png` 文件，而不是依赖宿主对
+Mermaid 代码块的默认预览。这样在不同 Agent 中使用时，图表外观更稳定。
 
 ## 30 秒开始
 
@@ -36,7 +36,7 @@ node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 安装后直接对 Agent 说：
 
 ```text
-用 Craft Mermaid 把这套支付流程画成一张流程图，输出 SVG 和 PNG，并做视觉复检。
+用 Craft Mermaid 把这套支付流程画成一张高清流程图，并做视觉复检。
 ```
 
 也可以试这些请求：
@@ -44,7 +44,7 @@ node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 ```text
 把这份系统设计整理成 Craft 风格的架构图。
 用时序图说明 OAuth 登录流程，使用深色主题。
-把这段 Mermaid 渲染成 SVG 和 PNG，检查是否有文字裁切或节点重叠。
+把这段 Mermaid 渲染成高清 PNG，检查是否有文字裁切或节点重叠。
 ```
 
 ## 安装
@@ -64,7 +64,7 @@ node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 
 `setup-runtime.mjs` 不应省略。Skills CLI 只安装 Skill 文件，不会执行项目脚本；
 这个初始化入口会检查 Node.js 版本、执行 `npm ci`，再运行 smoke test。Skill
-的决策流程可以在没有依赖时被 Agent 读取，但 SVG/PNG 渲染、确定性检查和
+的决策流程可以在没有依赖时被 Agent 读取，但 PNG 渲染、确定性检查和
 视觉复检链路将无法完整执行。
 
 ### 方式二：把下面这段话直接发给 AI
@@ -156,11 +156,11 @@ Craft Mermaid 会：
 
 1. 根据内容选择兼容的图表类型和方向。
 2. 用固定版本的 `beautiful-mermaid` 和 Craft 明暗主题渲染。
-3. 生成规范化 Mermaid 源码、SVG、PNG 和 JSON 报告。
-4. 对 SVG 做确定性检查。
+3. 生成规范化 Mermaid 源码和高分辨率 PNG。
+4. 在内存中对 SVG 中间结果做确定性检查，不写入 SVG 文件。
 5. 在宿主支持查看图片时复检 PNG，并最多自动修复两轮。
 
-因此，可移植的视觉结果是生成的 SVG/PNG，而不是聊天界面重新渲染的代码块。
+因此，可移植的视觉结果是生成的 PNG，而不是聊天界面重新渲染的代码块。
 
 ## 支持的图表
 
@@ -186,7 +186,6 @@ node /absolute/path/to/craft-mermaid/scripts/runtime/render.mjs \
   --input diagram.mmd \
   --out-dir output \
   --theme craft-light \
-  --format all \
   --json
 ```
 
@@ -196,19 +195,17 @@ node /absolute/path/to/craft-mermaid/scripts/runtime/render.mjs \
 --input <path>             Mermaid 源文件，必填
 --out-dir <path>           输出目录，必填
 --theme craft-light|craft-dark
---format svg|png|all       默认 all
---max-width <pixels>       默认 1600
---max-height <pixels>      默认 1200
---json                     输出 JSON 报告
+--scale <factor>           默认 3
+--max-width <pixels>       默认 4096
+--max-height <pixels>      默认 3072
+--json                     向标准输出打印机器可读校验结果
 ```
 
 典型输出：
 
 ```text
 diagram.mmd
-diagram.svg
 diagram.png
-diagram.report.json
 ```
 
 输入和输出位于同一目录时，规范化源码会写为
@@ -216,8 +213,9 @@ diagram.report.json
 
 ## 视觉复检
 
-Skill 会先检查 SVG 的尺寸、危险内容和异常复杂度，再在宿主有图片查看能力时
-检查 PNG 的文字裁切、节点重叠、边线交叉、可读性、分组和留白。
+Skill 会先在内存中检查 SVG 中间结果的尺寸、危险内容和异常复杂度，再在宿主
+有图片查看能力时检查 PNG 的文字裁切、节点重叠、边线交叉、可读性、分组和
+留白。校验结果不会额外写成报告文件。
 
 视觉复检有明确边界：
 
@@ -243,10 +241,10 @@ Skill 会先检查 SVG 的尺寸、危险内容和异常复杂度，再在宿主
 - 运行时固定使用 `beautiful-mermaid@1.1.3` 和
   `@resvg/resvg-js@2.6.2`。
 - 提供 `craft-light` 和 `craft-dark` 两套主题。
-- SVG 会把主题色解析为具体颜色，并使用固定尺寸的箭头 marker，避免不同预览器
-  对 CSS 变量或 marker 单位的支持差异导致箭头不可见。
-- SVG 和 PNG 都使用系统字体回退；不同系统的文字度量可能产生轻微差异，PNG
-  则在生成时固定像素结果。
+- 内存中的 SVG 会把主题色解析为具体颜色、清理折线端点的亚像素残段，并使用
+  固定尺寸的箭头 marker，避免方向偏转；它只参与校验和 PNG 光栅化，不会落盘。
+- PNG 默认按 3 倍像素密度渲染，上限为 4096×3072；可通过 `--scale` 和最大
+  尺寸参数调整。渲染时使用系统字体回退，不同系统的文字度量可能轻微不同。
 - 自定义 `style` 或 `classDef` 会覆盖便携主题，除非用户明确要求，否则 Skill
   会避免使用。
 
@@ -269,7 +267,6 @@ craft-mermaid/
     └── runtime/
         ├── render.mjs
         ├── inspect-svg.mjs
-        ├── record-review.mjs
         ├── smoke-test.mjs
         ├── package.json
         └── package-lock.json

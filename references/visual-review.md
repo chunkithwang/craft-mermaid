@@ -1,7 +1,7 @@
 # Visual Review Protocol
 
-Review the PNG generated from the same `beautiful-mermaid` SVG that will be
-delivered. Do not review a host-rendered Mermaid code fence.
+Review the delivered PNG generated from the validated in-memory
+`beautiful-mermaid` SVG. Do not review a host-rendered Mermaid code fence.
 
 ## Review Order
 
@@ -29,7 +29,8 @@ below 4. Otherwise pass only when the average score is at least 3.6.
 
 ## Required Result
 
-Return this structure in the agent's reasoning or artifact report:
+Keep this structure in the agent's reasoning while performing the review. Do
+not write it as a separate artifact:
 
 ```json
 {

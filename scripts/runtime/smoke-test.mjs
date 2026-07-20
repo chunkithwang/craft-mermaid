@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { flattenSvgColors, normalizeArrowMarkers, renderDiagram } from './render.mjs'
+import {
+  flattenSvgColors,
+  normalizeArrowMarkers,
+  normalizeMarkerPolylinePoints,
+  renderDiagram,
+} from './render.mjs'
 import { inspectSvg } from './inspect-svg.mjs'
-import { recordReview } from './record-review.mjs'
 
 const fixtures = {
   flowchart: 'graph LR\n    A[Input] --> B{Valid?}\n    B -->|Yes| C[Output]\n',
@@ -22,28 +26,23 @@ for (const [name, source] of Object.entries(fixtures)) {
   const input = join(root, `${name}.mmd`)
   const output = join(root, `${name}-output`)
   await writeFile(input, source, 'utf8')
-  const report = await renderDiagram({
+  const result = await renderDiagram({
     input,
     outDir: output,
     theme: name === 'state' ? 'craft-dark' : 'craft-light',
-    format: 'all',
-    maxWidth: 1600,
-    maxHeight: 1200,
   })
 
-  assert.equal(report.valid, true, `${name}: ${report.errors.join(' ')}`)
-  assert.ok(report.artifacts.svg)
-  assert.ok(report.artifacts.png)
-  assert.ok(report.raster.readablePixels > 20, `${name}: preview has no readable palette content`)
-  const svg = await readFile(report.artifacts.svg, 'utf8')
-  assert.doesNotMatch(svg, /var\(|color-mix\(/i, `${name}: portable SVG contains unresolved colors`)
+  assert.equal(result.valid, true, `${name}: ${result.errors.join(' ')}`)
+  assert.ok(result.artifacts.png)
+  assert.ok(result.raster.readablePixels > 20, `${name}: preview has no readable palette content`)
+  assert.equal(result.raster.scale, 3, `${name}: preview should render at 3x pixel density`)
+  assert.deepEqual((await readdir(output)).sort(), [`${name}.mmd`, `${name}.png`])
   if (['flowchart', 'state', 'sequence'].includes(name)) {
-    assert.ok(report.metrics.directedEdges > 0, `${name}: fixture should contain directed edges`)
-    assert.ok(report.metrics.arrowMarkerReferences > 0, `${name}: fixture should reference arrow markers`)
-    assert.match(svg, /markerWidth="12" markerHeight="8"[^>]*markerUnits="userSpaceOnUse"/)
+    assert.ok(result.metrics.directedEdges > 0, `${name}: fixture should contain directed edges`)
+    assert.ok(result.metrics.arrowMarkerReferences > 0, `${name}: fixture should reference arrow markers`)
   }
-  if (report.raster.accentPixels > 3) diagramsWithAccent += 1
-  const png = await readFile(report.artifacts.png)
+  if (result.raster.accentPixels > 3) diagramsWithAccent += 1
+  const png = await readFile(result.artifacts.png)
   assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG')
 }
 
@@ -70,8 +69,27 @@ const normalizedMarker = normalizeArrowMarkers(`
     <polygon points="0 0, 8 2.5, 0 5" />
   </marker></defs></svg>
 `)
-assert.match(normalizedMarker, /markerWidth="12" markerHeight="8"[^>]*markerUnits="userSpaceOnUse"/)
-assert.match(normalizedMarker, /points="0 0, 12 4, 0 8"/)
+assert.match(normalizedMarker, /markerWidth="9" markerHeight="6"[^>]*refX="9"[^>]*markerUnits="userSpaceOnUse"/)
+assert.match(normalizedMarker, /points="0 0, 9 3, 0 6"/)
+
+const normalizedSequenceMarker = normalizeArrowMarkers(`
+  <svg><defs><marker id="seq-arrow" markerWidth="8" markerHeight="5" refX="8" refY="2.5">
+    <polygon points="0 0, 8 2.5, 0 5" />
+  </marker></defs></svg>
+`)
+assert.match(normalizedSequenceMarker, /markerWidth="12" markerHeight="8"[^>]*refX="12"[^>]*markerUnits="userSpaceOnUse"/)
+assert.match(normalizedSequenceMarker, /points="0 0, 12 4, 0 8"/)
+
+const normalizedPolyline = normalizeMarkerPolylinePoints(`
+  <svg>
+    <polyline marker-end="url(#arrowhead)" points="0,0 0,100 0.0000001,100" />
+    <polyline marker-start="url(#arrowhead-start)" points="20,0 20.0000001,0 20,100" />
+    <polyline points="40,0 40,100 40.0000001,100" />
+  </svg>
+`)
+assert.match(normalizedPolyline, /marker-end="url\(#arrowhead\)" points="0,0 0,100"/)
+assert.match(normalizedPolyline, /marker-start="url\(#arrowhead-start\)" points="20,0 20,100"/)
+assert.match(normalizedPolyline, /<polyline points="40,0 40,100 40\.0000001,100"/)
 assert.equal(
   flattenSvgColors('<svg style="--accent: #8453ed"><polygon fill="var(--_arrow)" /></svg>', {
     bg: '#f7f8fa',
@@ -91,12 +109,10 @@ const invalidReport = await renderDiagram({
   input: invalidInput,
   outDir: join(root, 'invalid-output'),
   theme: 'craft-light',
-  format: 'all',
-  maxWidth: 1600,
-  maxHeight: 1200,
 })
 assert.equal(invalidReport.valid, false)
 assert.match(invalidReport.errors.join(' '), /Unsupported diagram type/)
+assert.deepEqual(invalidReport.artifacts, {})
 
 const collisionInput = join(root, 'collision.mmd')
 const collisionSource = '---\ntitle: Collision safety\n---\ngraph LR\n    A --> B\n'
@@ -105,30 +121,10 @@ const collisionReport = await renderDiagram({
   input: collisionInput,
   outDir: root,
   theme: 'craft-light',
-  format: 'svg',
-  maxWidth: 1600,
-  maxHeight: 1200,
 })
 assert.equal(collisionReport.valid, true)
 assert.notEqual(collisionReport.artifacts.source, collisionInput)
 assert.equal(await readFile(collisionInput, 'utf8'), collisionSource)
 assert.match(collisionReport.artifacts.source, /collision\.normalized\.mmd$/)
-
-const reviewPath = join(root, 'collision.visual-review.json')
-await writeFile(reviewPath, `${JSON.stringify({
-  status: 'passed',
-  round: 1,
-  scores: {
-    semanticCoverage: 5,
-    legibility: 5,
-    layout: 5,
-    grouping: 4,
-    density: 4,
-  },
-  issues: [],
-}, null, 2)}\n`, 'utf8')
-const reviewedReport = await recordReview(collisionReport.artifacts.report, reviewPath)
-assert.equal(reviewedReport.visualReview.status, 'passed')
-assert.equal(JSON.parse(await readFile(collisionReport.artifacts.report, 'utf8')).visualReview.status, 'passed')
 
 console.log(`Craft Mermaid runtime smoke tests passed (${Object.keys(fixtures).length} diagram types).`)
