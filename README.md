@@ -147,6 +147,25 @@ node "$CRAFT_MERMAID_DIR/scripts/setup-runtime.mjs"
 在 Git 实际拉取到新提交后重新执行初始化入口，使本地运行时与仓库中的
 `package-lock.json` 保持一致，并立即验证渲染链路。
 
+## DeepSeek Harness 安装（bundle）
+
+这个仓库同时是一个 DeepSeek Harness profile bundle：根目录 `package.json`
+声明 `dsh.bundle.patch`，`cordis.patch.yml` 注册一个只服务于本仓库自身的
+skill 提供器，以及 `craft_mermaid_render` / `craft_mermaid_setup` 两个模型工具。
+
+```bash
+dsh plugin --profile web add "github:chunkithwang/craft-mermaid#main"
+dsh --profile web
+```
+
+装好后在会话里直接说「用 Craft Mermaid 画一张……」，或让 Agent 调用上述工具。
+根目录的 `SKILL.md` 会被自动发现为 skill；其余文件布局与 Codex / Claude Code
+安装方式完全一致，两种分发互不影响。
+
+注意：bundle 安装只带文件、不会自动执行依赖安装。首次安装后运行一次
+`craft_mermaid_setup`（或在 bundle 目录执行
+`node scripts/setup-runtime.mjs`），bundle 更新后同样需要重跑。
+
 ## 为什么不只输出 Mermaid 代码块
 
 不同编辑器和聊天客户端可能使用不同 Mermaid 版本、主题和布局参数。相同

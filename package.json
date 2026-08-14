@@ -1,0 +1,12 @@
+{
+  "name": "craft-mermaid",
+  "version": "1.0.0",
+  "description": "Craft Mermaid skill + DeepSeek Harness bundle: deterministic high-resolution Mermaid PNG rendering with Craft light/dark palettes and visual review.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

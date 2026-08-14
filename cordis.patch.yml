@@ -1,0 +1,17 @@
+# craft-mermaid DeepSeek Harness bundle layer.
+# Applied after the in-box base bundle over an empty entry list.
+# Strictly additive: a second skill-filesystem provider that serves ONLY this
+# bundle's own skill directory (the package root, where SKILL.md lives), plus
+# the Craft Mermaid tool plugin. `baseUrl` in the !!js expression resolves to
+# this patch file's directory (the bundle package root) wherever it is
+# installed, so no machine-specific paths appear here.
+- insert:
+    - id: skill-filesystem-craft-mermaid
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: craft-mermaid
+        includeDefaultRoots: false
+        customSkillDirs:
+          - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('.', baseUrl))"
+    - id: tool-craft-mermaid
+      name: 'craft-mermaid/dsh-plugin/lib/index.js'
